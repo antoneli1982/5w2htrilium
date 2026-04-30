@@ -5481,6 +5481,7 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
 
 <script>
 (function(){
+  console.log('[Boot] 🚀 IIFE iniciado, db.users:', (db && db.users) ? db.users.length : '?', 'db.empresas:', (db && db.empresas) ? db.empresas.length : '?');
   var SESS='lion_remember_session';
   function goApp(u){
     session.user=u;
@@ -5531,9 +5532,14 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
   function _tryAutoLogin(){
     try{
       var savedRaw = localStorage.getItem(SESS);
+      console.log('[Session] 🔍 verificando sessão salva:', savedRaw ? 'EXISTE' : 'VAZIO');
       if(!savedRaw) return false;
       var saved = JSON.parse(savedRaw);
-      if(!saved || !saved.user) return false;
+      console.log('[Session] 🔍 dados salvos:', saved);
+      if(!saved || !saved.user) {
+        console.log('[Session] ❌ sessão inválida, sem user');
+        return false;
+      }
 
       // Validar tipo de usuário
       var valid = false;
@@ -5543,29 +5549,61 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
         if(empId && Array.isArray(db.empresas)){
           valid = db.empresas.some(function(e){ return e.id === empId; });
         }
+        console.log('[Session] cliente, empresa', empId, 'válida?', valid);
       } else if(saved._adminMode){
         // Modo administrador (botão 🔑) — sempre válido
         valid = true;
+        console.log('[Session] adminMode = válido');
       } else if(saved._guest){
-        // Visualização — sempre válido
-        valid = true;
+        // Visualização: NÃO restaura automaticamente (deixa ir para tela de bloqueio)
+        valid = false;
+        console.log('[Session] guest/visualização - NÃO restaura, vai para tela de bloqueio');
       } else if(saved.user==='admin' || saved.user==='antoneli'){
         // Hardcoded — sempre válidos
         valid = true;
+        console.log('[Session] hardcoded user válido');
       } else if(Array.isArray(db.users)){
         // Usuário cadastrado no banco
         valid = db.users.some(function(u){ return u.user === saved.user; });
+        console.log('[Session] usuário cadastrado válido?', valid);
       }
-      if(!valid) return false;
+      if(!valid) {
+        console.log('[Session] ❌ sessão não validada, indo para tela de bloqueio');
+        return false;
+      }
 
-      console.log('[Session] 🔓 auto-login:', saved.user, saved._cliente ? '(cliente)' : saved._adminMode ? '(admin)' : saved._guest ? '(visualização)' : '');
+      console.log('[Session] 🔓 AUTO-LOGIN executando para:', saved.user, saved._cliente ? '(cliente)' : saved._adminMode ? '(admin)' : '');
 
       // Restaura empresaId se for cliente
       if(saved._cliente && (saved._sessionEmpresaId || saved._empresaId)){
         session.empresaId = saved._sessionEmpresaId || saved._empresaId;
       }
 
-      goApp(saved);
+      // Define a sessão ANTES de chamar goApp
+      session.user = saved;
+      session.dashSc = saved.role==='cli'?'cli':'op';
+
+      // Chama goApp se existir
+      if(typeof goApp === 'function'){
+        try{ goApp(saved); }catch(e){ console.error('[Session] erro em goApp:', e); }
+      } else {
+        // Fallback manual: ativa screen-app
+        try{
+          document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
+          var sa = document.getElementById('screen-app');
+          if(sa) sa.classList.add('active');
+          if(typeof renderSidebar==='function') renderSidebar();
+          if(typeof atualizarSidebarUsuario==='function') atualizarSidebarUsuario(saved);
+          if(typeof syncSidebarRoleAccess==='function') syncSidebarRoleAccess(saved);
+          if(typeof showDashboard==='function') showDashboard();
+        }catch(e){ console.error('[Session] erro fallback:', e); }
+      }
+
+      // Esconde tela de bloqueio se estava aberta
+      try{
+        var tb=document.getElementById('tela-bloqueio');
+        if(tb) tb.classList.remove('active');
+      }catch(e){}
 
       // Esconde botão "🔑 Administrador" se for cliente
       if(saved._cliente){
@@ -5592,6 +5630,7 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
       }
 
       try{ if(window._startPolling) window._startPolling(); }catch(e){}
+      console.log('[Session] ✅ AUTO-LOGIN COMPLETO');
       return true;
     }catch(e){
       console.warn('[Session] auto-login falhou:', e);
@@ -5613,7 +5652,9 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
   }
 
   // ⚡ Auto-login IMEDIATO (não espera Firebase) — evita flash da tela de bloqueio
+  console.log('[Boot] 🔄 chamando _tryAutoLogin...');
   if(_tryAutoLogin()){
+    console.log('[Boot] ✅ auto-login OK, escondendo loading');
     if(ov) ov.style.display='none';
     // Carrega dados do Firebase em paralelo (sem bloquear UI)
     if(window._fbLoad){

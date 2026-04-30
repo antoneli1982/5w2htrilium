@@ -5611,12 +5611,31 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
       setTimeout(_bootBloqueio, 50);
     }
   }
-  if(window._fbLoad){
-    window._fbLoad(function(ok){
-      _bootBloqueio();
-    });
+
+  // ⚡ Auto-login IMEDIATO (não espera Firebase) — evita flash da tela de bloqueio
+  if(_tryAutoLogin()){
+    if(ov) ov.style.display='none';
+    // Carrega dados do Firebase em paralelo (sem bloquear UI)
+    if(window._fbLoad){
+      setTimeout(function(){
+        window._fbLoad(function(ok){
+          // Após carregar do servidor, atualiza a UI se necessário
+          try{
+            if(typeof renderSidebar==='function') renderSidebar();
+            if(typeof showDashboard==='function' && !session.projId) showDashboard();
+          }catch(e){}
+        });
+      }, 200);
+    }
   } else {
-    _bootBloqueio();
+    // Sem sessão: caminho normal (espera Firebase para baixar dados, depois mostra bloqueio)
+    if(window._fbLoad){
+      window._fbLoad(function(ok){
+        _bootBloqueio();
+      });
+    } else {
+      _bootBloqueio();
+    }
   }
   setTimeout(function(){
     if(ov)ov.style.display='none';
@@ -6316,6 +6335,19 @@ document.addEventListener('keydown', function(e){
 // ══════════════════════════════════════════
 
 function mostrarTelaBloqueio(){
+  // Proteção: se há sessão real ativa (admin, cliente ou usuário cadastrado),
+  // não mostra a tela de bloqueio (evita flicker no F5 após auto-login)
+  if(session && session.user){
+    var u = session.user;
+    var isPreAdmin = u.user === '_pre_admin';
+    // Sessão real = não é pré-admin nem visualização-fantasma
+    var isRealSession = u._adminMode || u._cliente ||
+                        (u.user!=='_pre_admin' && u.user!=='visualizacao');
+    if(!isPreAdmin && isRealSession){
+      console.log('[Bloqueio] sessão ativa de', u.user, '- não mostrando tela de bloqueio');
+      return;
+    }
+  }
   // Esconde a tela do app e mostra o bloqueio
   try{
     document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});

@@ -759,18 +759,12 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
         localStorage.setItem(DB_K, JSON.stringify(cl));
       }catch(e){}
 
-      // Após o merge, dispara um save para que o Firebase tenha a versão consolidada
-      // (evita que outro navegador "atropele" os dados que existiam só localmente)
-      try{
-        if(window._fbSave) {
-          setTimeout(function(){
-            console.log('[FB] 💾 salvando versão consolidada (merge resultado)');
-            window._fbSave();
-          }, 800);
-        }
-      }catch(e){}
+      // Marca para que o próximo SAVE deste navegador inclua os dados consolidados.
+      // Não fazemos save imediato aqui — isso causaria loop infinito de sincronização.
+      // O save consolidado vai acontecer naturalmente na próxima ação do usuário.
     }
 
+    var _lastToastAt = 0;
     function _syncUI(){
       if(typeof session==='undefined' || !session.user) return;
       try{
@@ -788,7 +782,12 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
         } else {
           if(typeof showDashboard==='function') showDashboard();
         }
-        if(typeof showToast==='function') showToast('☁️ Sincronizado!');
+        // Só mostra toast a cada 10 segundos (evita "spam" durante uso colaborativo)
+        var now = Date.now();
+        if(now - _lastToastAt > 10000){
+          _lastToastAt = now;
+          if(typeof showToast==='function') showToast('☁️ Sincronizado!');
+        }
       }catch(ex){ console.warn('[FB] syncUI error', ex); }
     }
 
@@ -850,34 +849,92 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
       }
     }
 
-    // SAVE
-    window._fbSave = function(){
+    // SAVE — agora faz MERGE com servidor antes de gravar (evita atropelamento)
+    var _saveInProgress = false;
+    var _savePending = false;
+
+    function _doActualSave() {
       if(!_ref){ console.warn('[FB] save: _ref não inicializado'); return; }
-      try{
-        var cl = JSON.parse(JSON.stringify(db));
-        cl.users.forEach(function(u){delete u.photo;});
-        // Remove excelRows do Firebase (pode ultrapassar 1MB) - salvo só no localStorage
-        (cl.projects||[]).forEach(function(p){ delete p.excelRows; });
-        var sid = _tabId + '_' + Date.now().toString(36);
-        _lastSavedId = sid;
-        cl.saveId    = sid;
-        cl.lastSaved = Date.now();
-        db.saveId    = sid;
-        db.lastSaved = cl.lastSaved;
-        var photos = {};
-        db.users.forEach(function(u){ if(u.photo) photos[u.user] = u.photo; });
-        try{ localStorage.setItem(PH_K, JSON.stringify(photos)); }catch(e){}
-        try{ _setStatus('syncing', 'Salvando...'); }catch(e){}
-        _ref.set({ db: JSON.stringify(cl), photos: JSON.stringify(photos), updated: new Date().toISOString() })
-          .then(function(){
-            console.log('[FB] saved ✅', sid);
-            try{ _setStatus('connected', 'Online'); }catch(e){}
-          })
-          .catch(function(e){
-            console.error('[FB] save error:', e.code, e.message);
-            try{ _setStatus('error', 'Erro ao salvar'); }catch(e){}
-          });
-      }catch(e){ console.error('[FB] save exception:', e); }
+      _saveInProgress = true;
+      _ref.get().then(function(snap){
+        // 1. Pega o que está no servidor agora
+        var serverData = null;
+        try{
+          var exists = (typeof snap.exists==='function') ? snap.exists() : snap.exists;
+          if(exists){
+            var d = snap.data();
+            if(d && d.db) serverData = JSON.parse(d.db);
+          }
+        }catch(e){ console.warn('[FB] save: erro lendo server', e); }
+
+        // 2. Se servidor tem dados que NÃO foram feitos por este navegador, faz merge antes de salvar
+        if(serverData && !_isOwnSave(serverData.saveId || '')) {
+          console.log('[FB] 🔀 save: detectou dados novos no server, fazendo merge antes...');
+          var photos = null;
+          try{ photos = snap.data().photos ? JSON.parse(snap.data().photos) : null; }catch(e){}
+          // Aplica o remoto (que vai mesclar com nosso local)
+          _applyRemote(serverData, photos);
+        }
+
+        // 3. Agora sim salva o resultado consolidado
+        try{
+          var cl = JSON.parse(JSON.stringify(db));
+          cl.users.forEach(function(u){delete u.photo;});
+          (cl.projects||[]).forEach(function(p){ delete p.excelRows; });
+          var sid = _tabId + '_' + Date.now().toString(36);
+          _lastSavedId = sid;
+          cl.saveId    = sid;
+          cl.lastSaved = Date.now();
+          db.saveId    = sid;
+          db.lastSaved = cl.lastSaved;
+          var photosOut = {};
+          db.users.forEach(function(u){ if(u.photo) photosOut[u.user] = u.photo; });
+          try{ localStorage.setItem(PH_K, JSON.stringify(photosOut)); }catch(e){}
+          try{ _setStatus('syncing', 'Salvando...'); }catch(e){}
+          _ref.set({ db: JSON.stringify(cl), photos: JSON.stringify(photosOut), updated: new Date().toISOString() })
+            .then(function(){
+              console.log('[FB] saved ✅', sid);
+              try{ _setStatus('connected', 'Online'); }catch(e){}
+              _saveInProgress = false;
+              if(_savePending) { _savePending = false; setTimeout(_doActualSave, 400); }
+            })
+            .catch(function(e){
+              console.error('[FB] save error:', e.code, e.message);
+              try{ _setStatus('error', 'Erro ao salvar'); }catch(e){}
+              _saveInProgress = false;
+            });
+        }catch(e){
+          console.error('[FB] save exception:', e);
+          _saveInProgress = false;
+        }
+      }).catch(function(e){
+        console.warn('[FB] save: get falhou, salvando direto', e);
+        _saveInProgress = false;
+        // Fallback: salva sem merge se não conseguir ler
+        try{
+          var cl = JSON.parse(JSON.stringify(db));
+          cl.users.forEach(function(u){delete u.photo;});
+          (cl.projects||[]).forEach(function(p){ delete p.excelRows; });
+          var sid = _tabId + '_' + Date.now().toString(36);
+          _lastSavedId = sid;
+          cl.saveId = sid;
+          cl.lastSaved = Date.now();
+          db.saveId = sid;
+          db.lastSaved = cl.lastSaved;
+          var photosOut = {};
+          db.users.forEach(function(u){ if(u.photo) photosOut[u.user] = u.photo; });
+          _ref.set({ db: JSON.stringify(cl), photos: JSON.stringify(photosOut), updated: new Date().toISOString() });
+        }catch(e2){ console.error('[FB] fallback save error', e2); }
+      });
+    }
+
+    window._fbSave = function(){
+      // Debounce: se já tem um save em andamento, marca como pendente em vez de empilhar
+      if(_saveInProgress) {
+        _savePending = true;
+        return;
+      }
+      _doActualSave();
     };
 
     // LOAD (força leitura direta do Firestore)
@@ -6304,12 +6361,76 @@ document.getElementById('modal-cliente-pass').addEventListener('click',function(
   if(e.target===this) fecharModalCliente();
 });
 
-// ── Inicialização: ao carregar tudo, mostra a tela de bloqueio ──
+// ── Inicialização: ao carregar tudo, tenta auto-login ou mostra tela de bloqueio ──
 window.addEventListener('load', function(){
   setTimeout(function(){
-    // Se ainda não tem usuário (fluxo normal), mostra tela de bloqueio
+    // 1. Tenta restaurar sessão anterior (F5 / reabrir aba)
+    try{
+      var savedSession = localStorage.getItem('lion_remember_session');
+      if(savedSession){
+        var found = JSON.parse(savedSession);
+        // Validar que o usuário ainda existe no db (pode ter sido removido)
+        var userStillValid = false;
+        try{
+          if(found && found.user){
+            // Hardcoded users sempre são válidos
+            if(found.user === 'admin' || found.user === 'antoneli' || found._guest) {
+              userStillValid = true;
+            } else {
+              // Procura no db.users
+              userStillValid = (db.users || []).some(function(u){ return u.user === found.user; });
+            }
+          }
+        }catch(e){}
+
+        if(userStillValid && found && found.user){
+          console.log('[Session] 🔓 restaurando sessão de:', found.user);
+          session.user = found;
+          session.dashSc = 'op';
+
+          // Atualiza UI da sidebar
+          try{
+            var av = document.getElementById('s-avatar');
+            var nm = document.getElementById('s-name');
+            var rl = document.getElementById('s-role');
+            if(av){
+              av.className = 'user-avatar ' + (
+                found.role === 'senior' ? 'senior' :
+                found.role === 'fin' ? 'fin' : ''
+              );
+              if(found.photo){
+                av.innerHTML = '<img src="'+found.photo+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+              }else{
+                var nome = found.nome || found.name || found.user || '';
+                av.textContent = nome ? nome.charAt(0).toUpperCase() : 'U';
+              }
+            }
+            if(nm) nm.textContent = found.nome || found.name || found.user || '';
+            if(rl){
+              rl.textContent = found.role==='senior' ? '👑 Sênior' : found.role==='fin' ? '🟣 Financeiro' : found.role==='cli' ? '🟢 Cliente' : '🔵 Operacional';
+              rl.className='user-role role-'+found.role;
+            }
+          }catch(e){ console.warn('[Session] erro UI', e); }
+
+          if(typeof showScreen==='function') showScreen('screen-app');
+          if(typeof syncSidebarRoleAccess==='function') syncSidebarRoleAccess(found);
+
+          // Carrega dados do Firebase e roteia
+          if(window._fbLoad){
+            window._fbLoad(function(){
+              if(typeof routeAfterLogin==='function') routeAfterLogin();
+              if(window._startPolling) window._startPolling();
+            });
+          } else {
+            if(typeof routeAfterLogin==='function') routeAfterLogin();
+          }
+          return; // Não vai para tela de bloqueio
+        }
+      }
+    }catch(e){ console.warn('[Session] erro restaurando', e); }
+
+    // 2. Se não tem sessão salva, mostra tela de bloqueio normal
     if(!session.user || session.user.user==='visualizacao' || session.user.user==='_pre_admin'){
-      // Reseta para estado inicial
       try{
         session.user=null;
         session.empresaId=null;

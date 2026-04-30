@@ -745,6 +745,18 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
         console.log('[FB] init ✅', APP_DOC, '| tabId:', _tabId);
         try{ _setStatus('connected', 'Online'); }catch(e){}
 
+        // FORCE LOAD inicial — garante que dados venham do servidor logo na abertura
+        setTimeout(function(){
+          if(window._fbLoad) {
+            window._fbLoad(function(ok){
+              if(ok) {
+                console.log('[FB] 🚀 carga inicial OK — re-renderizando UI');
+                try{ _syncUI(); }catch(e){}
+              }
+            });
+          }
+        }, 500);
+
         // onSnapshot — tempo real
         _ref.onSnapshot(function(snap){
           if(!snap) return;
@@ -825,6 +837,30 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
           if(cb) cb(true);
         }catch(ex){ console.error('[FB] load parse error', ex); if(cb) cb(false); }
       }).catch(function(e){ console.error('[FB] load error:', e.code, e.message); if(cb) cb(false); });
+    };
+
+    // FORÇA SINCRONIZAÇÃO TOTAL — limpa cache local e busca direto do Firebase
+    window._fbForceSync = function(){
+      try{
+        console.log('[FB] 🔄 Forçando sincronização total...');
+        // Salva sessão e foto antes de limpar
+        var keepKeys = ['lion_remember', 'lion_remember_session', 'lion_sidebar_collapsed'];
+        var saved = {};
+        keepKeys.forEach(function(k){
+          var v = localStorage.getItem(k);
+          if(v !== null) saved[k] = v;
+        });
+        // Limpa cache do app
+        try{ localStorage.removeItem('trilium_db'); }catch(e){}
+        try{ localStorage.removeItem('trilium_photos'); }catch(e){}
+        // Restaura sessão
+        Object.keys(saved).forEach(function(k){ localStorage.setItem(k, saved[k]); });
+        // Recarrega
+        location.reload(true);
+      }catch(e){
+        console.error('[FB] erro na força sync:', e);
+        location.reload(true);
+      }
     };
 
     // POLLING — backup para quando onSnapshot não funcionar
@@ -1023,9 +1059,10 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
     <div class="topbar">
       <div class="topbar-title" id="tb-title">Dashboard</div>
       <div id="tb-badge"></div>
-      <div id="fb-status" title="Status da sincronização" style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:99px;font-family:Montserrat,sans-serif;font-size:10px;font-weight:700;background:#0e2424;border:1px solid #A9E52733;color:#A9E527;letter-spacing:.4px">
+      <div id="fb-status" title="Clique para forçar sincronização" onclick="if(confirm('Forçar sincronização? Vai recarregar a página e baixar os dados mais recentes do servidor.')) window._fbForceSync()" style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:99px;font-family:Montserrat,sans-serif;font-size:10px;font-weight:700;background:#0e2424;border:1px solid #A9E52733;color:#A9E527;letter-spacing:.4px;cursor:pointer">
         <span id="fb-dot" style="width:7px;height:7px;border-radius:50%;background:#888;display:inline-block;transition:background .3s"></span>
         <span id="fb-text">Conectando...</span>
+        <span style="font-size:9px;opacity:.6;margin-left:3px">🔄</span>
       </div>
       <button id="btn-admin-mode" onclick="abrirModalAdmin()" title="Acesso administrador (permite alterar dados)" style="background:linear-gradient(135deg,#A9E52722,#A9E52711);color:#A9E527;border:1.5px solid #A9E52766;font-family:Montserrat,sans-serif;font-weight:800;font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;letter-spacing:.3px;display:flex;align-items:center;gap:6px;transition:all .2s">🔑 <span>Administrador</span></button>
       <button id="btn-admin-exit" onclick="sairModoAdmin()" title="Voltar ao modo visualização" style="display:none;background:linear-gradient(135deg,#4ade8022,#4ade8011);color:#4ade80;border:1.5px solid #4ade8066;font-family:Montserrat,sans-serif;font-weight:800;font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;letter-spacing:.3px;align-items:center;gap:6px">✅ <span>Modo Admin · Sair</span></button>

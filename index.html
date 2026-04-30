@@ -1204,9 +1204,40 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
         <option value="op">🔵 Operacional</option>
       </select>
     </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:6px"><span style="color:#5b87dc">🟦</span> Link do Microsoft Teams <span style="font-size:10px;color:var(--gray);font-weight:400">(opcional)</span></label>
+      <input id="np-teams" type="url" placeholder="https://teams.microsoft.com/l/channel/...">
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:6px"><span style="color:#fbbc04">📁</span> Link do Google Drive <span style="font-size:10px;color:var(--gray);font-weight:400">(opcional)</span></label>
+      <input id="np-drive" type="url" placeholder="https://drive.google.com/drive/folders/...">
+    </div>
     <div class="modal-btns">
       <button class="btn-secondary" onclick="closeModal('modal-new-proj')">Cancelar</button>
       <button class="btn-primary" onclick="createProject()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-edit-links">
+  <div class="modal">
+    <div class="modal-title">🔗 Links do Projeto</div>
+    <div class="modal-sub" id="el-proj-name" style="color:#A9E527;font-weight:700"></div>
+    <input type="hidden" id="el-proj-id">
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:6px"><span style="color:#5b87dc">🟦</span> Link do Microsoft Teams</label>
+      <input id="el-teams" type="url" placeholder="https://teams.microsoft.com/l/channel/...">
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:6px"><span style="color:#fbbc04">📁</span> Link do Google Drive</label>
+      <input id="el-drive" type="url" placeholder="https://drive.google.com/drive/folders/...">
+    </div>
+    <div style="font-size:11px;color:var(--gray);margin-bottom:10px;line-height:1.4">
+      💡 Deixe em branco para esconder o botão. Os links abrirão em nova aba para todos os usuários do projeto.
+    </div>
+    <div class="modal-btns">
+      <button class="btn-secondary" onclick="fecharEditLinksProjeto()">Cancelar</button>
+      <button class="btn-primary" onclick="salvarEditLinksProjeto()">💾 Salvar links</button>
     </div>
   </div>
 </div>
@@ -2956,6 +2987,12 @@ function createProject(){
   const creator = session.user;
   const allowedUsers = creator.role === 'senior' ? 'all' : [creator.user];
 
+  // Captura os links opcionais (Teams e Drive)
+  const teamsInp = document.getElementById('np-teams');
+  const driveInp = document.getElementById('np-drive');
+  const teamsUrl = teamsInp ? teamsInp.value.trim() : '';
+  const driveUrl = driveInp ? driveInp.value.trim() : '';
+
   db.projects.push({
     id: db.nextProjId++,
     empresaId: session.empresaId,
@@ -2965,6 +3002,8 @@ function createProject(){
     gantt: [],
     chat: [],
     links: [],
+    teamsUrl: teamsUrl,
+    driveUrl: driveUrl,
     cardVisible: true,
     allowedUsers,
     createdBy: creator.user
@@ -2974,9 +3013,87 @@ function createProject(){
   closeModal('modal-new-proj');
 
   document.getElementById('np-name').value = '';
+  if(teamsInp) teamsInp.value = '';
+  if(driveInp) driveInp.value = '';
 
   showDashboard();
 }
+// ══════════════════════════════════════════
+// LINKS DO PROJETO (Teams + Google Drive)
+// ══════════════════════════════════════════
+
+// Renderiza botões de Teams e Drive no cabeçalho de cada tela do projeto
+function renderProjectLinks(p){
+  if(!p) return '';
+  const teams = (p.teamsUrl||'').trim();
+  const drive = (p.driveUrl||'').trim();
+  const canEdit = !isReadOnly();
+  // Se não tem nenhum link e não pode editar, esconde tudo
+  if(!teams && !drive && !canEdit) return '';
+
+  let html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0 14px 0">';
+
+  // Botão Teams (azul Microsoft)
+  if(teams){
+    html += `<a href="${escapeHtml(teams)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#5b87dc,#464eb8);color:#fff;text-decoration:none;border-radius:10px;padding:8px 14px;font-family:Montserrat,sans-serif;font-size:12px;font-weight:700;border:1px solid #5b87dc55;box-shadow:0 0 18px #5b87dc33;transition:transform .15s" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.6 6.5h-4.5V4.6c0-1.4 1.1-2.5 2.5-2.5h2c1.4 0 2.5 1.1 2.5 2.5v.4c0 .8-.7 1.5-1.5 1.5h-1zm-9.6 1c2.8 0 5 2.2 5 5v6c0 2.8-2.2 5-5 5H4c-1.1 0-2-.9-2-2V9.5c0-1.1.9-2 2-2h6zm3 4H7v8h6v-8zm6-2h2v8.7c0 1.8-1.4 3.3-3.2 3.3-1.7 0-3.1-1.3-3.3-3l-.1-.7v-1c.7.5 1.5.7 2.4.7 2.3 0 4.2-1.9 4.2-4.2v-3.8z"/></svg>
+      <span>Teams</span>
+    </a>`;
+  }
+  // Botão Google Drive (gradiente Google)
+  if(drive){
+    html += `<a href="${escapeHtml(drive)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#fbbc04,#34a853 50%,#4285f4);color:#fff;text-decoration:none;border-radius:10px;padding:8px 14px;font-family:Montserrat,sans-serif;font-size:12px;font-weight:700;border:1px solid #ffffff22;box-shadow:0 0 18px #fbbc0433;transition:transform .15s" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7.71 3.5L1.15 15l3.18 5.5h13.34L21 15 14.43 3.5H7.71zm.58 1h7.42L20.14 14H8.86L4.29 6.36 8.29 4.5z"/></svg>
+      <span>Google Drive</span>
+    </a>`;
+  }
+  // Botão Editar (apenas para admin)
+  if(canEdit){
+    html += `<button onclick="abrirEditLinksProjeto(${p.id})" title="${teams||drive ? 'Editar links' : 'Adicionar links Teams e Drive'}" style="display:inline-flex;align-items:center;gap:6px;background:#0e2424;color:#A9E527;border:1px dashed #A9E52766;border-radius:10px;padding:7px 12px;font-family:Montserrat,sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s" onmouseover="this.style.background='#163030'" onmouseout="this.style.background='#0e2424'">
+      ${teams||drive ? '✏️ Editar links' : '🔗 Adicionar links'}
+    </button>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// Abre modal para editar links de um projeto existente
+function abrirEditLinksProjeto(projId){
+  if(isReadOnly()){ alert('⛔ Apenas administradores podem editar.'); return; }
+  const p = (db.projects||[]).find(x=>x.id===projId);
+  if(!p){ alert('Projeto não encontrado.'); return; }
+  const m = document.getElementById('modal-edit-links');
+  if(!m) return;
+  document.getElementById('el-proj-id').value = projId;
+  document.getElementById('el-proj-name').textContent = p.name || '';
+  document.getElementById('el-teams').value = p.teamsUrl || '';
+  document.getElementById('el-drive').value = p.driveUrl || '';
+  m.classList.add('active');
+}
+
+function fecharEditLinksProjeto(){
+  const m = document.getElementById('modal-edit-links');
+  if(m) m.classList.remove('active');
+}
+
+function salvarEditLinksProjeto(){
+  const projId = parseInt(document.getElementById('el-proj-id').value, 10);
+  const p = (db.projects||[]).find(x=>x.id===projId);
+  if(!p){ alert('Projeto não encontrado.'); return; }
+  p.teamsUrl = document.getElementById('el-teams').value.trim();
+  p.driveUrl = document.getElementById('el-drive').value.trim();
+  saveDB();
+  fecharEditLinksProjeto();
+  // Re-renderiza a tela atual do projeto
+  try{
+    if(session.view==='gantt' && typeof renderGantt==='function') renderGantt(p);
+    else if(session.view==='chat' && typeof renderProjectChat==='function') renderProjectChat(p);
+    else if(typeof renderProject==='function') renderProject(p);
+  }catch(e){}
+  try{ showToast('🔗 Links salvos com sucesso!'); }catch(e){}
+}
+
 function askDelProj(id){
   if(session.user.role!=='senior'){alert('⛔ Apenas Sênior pode excluir.');return;}
   session.delProjId=id;
@@ -3048,6 +3165,8 @@ function renderProject(p){
   </div>
 
   ${isReadOnly()?`<div style="background:linear-gradient(180deg,#0f1620 0%,#0d1117 100%);border:1.5px solid #38bdf866;border-radius:12px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;box-shadow:0 0 14px #38bdf822"><span style="font-size:16px">🔵</span><div style="flex:1"><div style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#7dd3fc">Modo Operacional · Somente Leitura</div><div style="font-size:11.5px;color:var(--gray2);margin-top:2px">Você pode visualizar e acompanhar o projeto, mas alterações estão desativadas para o seu perfil.</div></div></div>`:''}
+
+  ${renderProjectLinks(p)}
 
   <div class="stats-bar">
     <div class="stat-pill"><div class="v" style="color:var(--green)">${t}</div><div class="l">Ações</div></div>
@@ -3133,6 +3252,7 @@ function renderProjectChat(p){
       <button class="view-tab active" onclick="openProject(${p.id},'chat')">💬 Chat</button>
     </div>
   </div>
+  ${renderProjectLinks(p)}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">
     <div style="background:linear-gradient(135deg,#1a1200,#0f0d00);border:1px solid #A9E52733;border-radius:14px;padding:16px">
       <div style="font-size:11px;color:#9CA3AF;font-weight:700;font-family:Montserrat,sans-serif;text-transform:uppercase;letter-spacing:.5px">Mensagens</div>
@@ -3901,6 +4021,8 @@ function renderGantt(p){
       </div>
     </div>
     <input type="file" id="cron-excel-input" accept="*/*" style="display:none" onchange="handleCronExcelSelected(event)">
+
+    ${renderProjectLinks(p)}
 
     <!-- ══ 5W2H SECUNDÁRIO EM DESTAQUE ══ -->
     <div style="background:linear-gradient(135deg,#1a1200 0%,#0f0d00 100%);border:2px solid #A9E52740;border-radius:18px;padding:18px 20px;margin-bottom:18px;box-shadow:0 0 32px #A9E52718,0 8px 28px #00000060;position:relative;overflow:hidden">

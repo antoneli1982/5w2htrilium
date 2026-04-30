@@ -1769,14 +1769,23 @@ function routeAfterLogin(){
 function doLogout(){
   if(window._stopPolling) window._stopPolling();
   _collabUnlocked = false;
-  session.user=null; try{localStorage.removeItem('lion_remember_session');}catch(e){}
+  session.user=null;
+  session.empresaId=null;
+  try{localStorage.removeItem('lion_remember_session');}catch(e){}
   syncSidebarRoleAccess(null);
-  showScreen('screen-login');
+  // Volta para tela de bloqueio (cliente/admin) em vez do screen-login antigo
+  if(typeof mostrarTelaBloqueio==='function'){
+    mostrarTelaBloqueio();
+  } else {
+    showScreen('screen-login');
+  }
   // Only clear fields if not remembered
   const saved=localStorage.getItem('lion_remember');
   if(!saved){
-    document.getElementById('l-user').value='';
-    document.getElementById('l-pass').value='';
+    var lu=document.getElementById('l-user');
+    var lp=document.getElementById('l-pass');
+    if(lu) lu.value='';
+    if(lp) lp.value='';
   }
 }
 
@@ -1862,6 +1871,8 @@ function entrarModoAdmin(){
   };
   session.user = adminUser;
   session.dashSc = 'op';
+  // Salva sessão para auto-login no F5
+  try{ localStorage.setItem('lion_remember_session', JSON.stringify(adminUser)); }catch(e){}
   try{
     var av=document.getElementById('s-avatar');
     var nm=document.getElementById('s-name');
@@ -1895,6 +1906,8 @@ function sairModoAdmin(){
   };
   session.user = guestUser;
   session.dashSc = 'op';
+  // Atualiza sessão salva (agora como visualização)
+  try{ localStorage.setItem('lion_remember_session', JSON.stringify(guestUser)); }catch(e){}
   try{
     var av=document.getElementById('s-avatar');
     var nm=document.getElementById('s-name');
@@ -5514,10 +5527,83 @@ function notificarEventoCronograma(tipoEvento, projeto, item, extras={}){ try{ q
   }
 
   var ov=document.getElementById('fb-loading');
-  // ⚠️ MODIFICADO: em vez de entrar direto, mostra tela de bloqueio (cliente/admin)
+  // ⚠️ MODIFICADO: tenta restaurar sessão salva antes de mostrar tela de bloqueio
+  function _tryAutoLogin(){
+    try{
+      var savedRaw = localStorage.getItem(SESS);
+      if(!savedRaw) return false;
+      var saved = JSON.parse(savedRaw);
+      if(!saved || !saved.user) return false;
+
+      // Validar tipo de usuário
+      var valid = false;
+      if(saved._cliente){
+        // Cliente: válido se a empresa ainda existe
+        var empId = saved._sessionEmpresaId || saved._empresaId;
+        if(empId && Array.isArray(db.empresas)){
+          valid = db.empresas.some(function(e){ return e.id === empId; });
+        }
+      } else if(saved._adminMode){
+        // Modo administrador (botão 🔑) — sempre válido
+        valid = true;
+      } else if(saved._guest){
+        // Visualização — sempre válido
+        valid = true;
+      } else if(saved.user==='admin' || saved.user==='antoneli'){
+        // Hardcoded — sempre válidos
+        valid = true;
+      } else if(Array.isArray(db.users)){
+        // Usuário cadastrado no banco
+        valid = db.users.some(function(u){ return u.user === saved.user; });
+      }
+      if(!valid) return false;
+
+      console.log('[Session] 🔓 auto-login:', saved.user, saved._cliente ? '(cliente)' : saved._adminMode ? '(admin)' : saved._guest ? '(visualização)' : '');
+
+      // Restaura empresaId se for cliente
+      if(saved._cliente && (saved._sessionEmpresaId || saved._empresaId)){
+        session.empresaId = saved._sessionEmpresaId || saved._empresaId;
+      }
+
+      goApp(saved);
+
+      // Esconde botão "🔑 Administrador" se for cliente
+      if(saved._cliente){
+        try{
+          var btnAdm=document.getElementById('btn-admin-mode');
+          if(btnAdm) btnAdm.style.display='none';
+        }catch(e){}
+      }
+      // Mostra botão "Sair admin" se entrou em modo admin
+      if(saved._adminMode){
+        try{
+          var btnEntrar=document.getElementById('btn-admin-mode');
+          var btnSair=document.getElementById('btn-admin-exit');
+          if(btnEntrar) btnEntrar.style.display='none';
+          if(btnSair) btnSair.style.display='flex';
+          // Restaura UI específica do admin
+          var av=document.getElementById('s-avatar');
+          var nm=document.getElementById('s-name');
+          var rl=document.getElementById('s-role');
+          if(av){ av.className='user-avatar'; av.textContent='A'; av.style.background='linear-gradient(135deg,#A9E527,#eab308)'; av.style.color='#0a0a0a'; }
+          if(nm) nm.textContent='Administrador';
+          if(rl){ rl.textContent='👑 Admin · Edição liberada'; rl.className='user-role'; rl.style.color='#A9E527'; }
+        }catch(e){}
+      }
+
+      try{ if(window._startPolling) window._startPolling(); }catch(e){}
+      return true;
+    }catch(e){
+      console.warn('[Session] auto-login falhou:', e);
+      return false;
+    }
+  }
+
   function _bootBloqueio(){
     if(ov) ov.style.display='none';
-    // Aguarda DOM estar pronto pra chamar mostrarTelaBloqueio
+    // 1. Antes de mostrar tela de bloqueio, tenta auto-login
+    if(_tryAutoLogin()) return;
+    // 2. Sem sessão salva: mostra tela de bloqueio
     if(typeof mostrarTelaBloqueio==='function'){
       mostrarTelaBloqueio();
     } else {
@@ -6303,6 +6389,12 @@ function entrarComoCliente(empresa){
   session.user=clienteUser;
   session.empresaId=empresa.id;
   session.dashSc='op';
+  // Salva sessão para auto-login no F5 (cliente também salva empresaId)
+  try{
+    var saveObj = JSON.parse(JSON.stringify(clienteUser));
+    saveObj._sessionEmpresaId = empresa.id;
+    localStorage.setItem('lion_remember_session', JSON.stringify(saveObj));
+  }catch(e){}
   document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
   document.getElementById('screen-app').classList.add('active');
   try{
@@ -6361,82 +6453,12 @@ document.getElementById('modal-cliente-pass').addEventListener('click',function(
   if(e.target===this) fecharModalCliente();
 });
 
-// ── Inicialização: ao carregar tudo, tenta auto-login ou mostra tela de bloqueio ──
+// ── Inicialização: o auto-login é feito no IIFE acima.
+// Este handler só serve como fallback caso o IIFE não tenha rodado.
 window.addEventListener('load', function(){
   setTimeout(function(){
-    // 1. Tenta restaurar sessão anterior (F5 / reabrir aba)
-    try{
-      var savedSession = localStorage.getItem('lion_remember_session');
-      if(savedSession){
-        var found = JSON.parse(savedSession);
-        // Validar que o usuário ainda existe no db (pode ter sido removido)
-        var userStillValid = false;
-        try{
-          if(found && found.user){
-            // Hardcoded users sempre são válidos
-            if(found.user === 'admin' || found.user === 'antoneli' || found._guest) {
-              userStillValid = true;
-            } else {
-              // Procura no db.users
-              userStillValid = (db.users || []).some(function(u){ return u.user === found.user; });
-            }
-          }
-        }catch(e){}
-
-        if(userStillValid && found && found.user){
-          console.log('[Session] 🔓 restaurando sessão de:', found.user);
-          session.user = found;
-          session.dashSc = 'op';
-
-          // Atualiza UI da sidebar
-          try{
-            var av = document.getElementById('s-avatar');
-            var nm = document.getElementById('s-name');
-            var rl = document.getElementById('s-role');
-            if(av){
-              av.className = 'user-avatar ' + (
-                found.role === 'senior' ? 'senior' :
-                found.role === 'fin' ? 'fin' : ''
-              );
-              if(found.photo){
-                av.innerHTML = '<img src="'+found.photo+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
-              }else{
-                var nome = found.nome || found.name || found.user || '';
-                av.textContent = nome ? nome.charAt(0).toUpperCase() : 'U';
-              }
-            }
-            if(nm) nm.textContent = found.nome || found.name || found.user || '';
-            if(rl){
-              rl.textContent = found.role==='senior' ? '👑 Sênior' : found.role==='fin' ? '🟣 Financeiro' : found.role==='cli' ? '🟢 Cliente' : '🔵 Operacional';
-              rl.className='user-role role-'+found.role;
-            }
-          }catch(e){ console.warn('[Session] erro UI', e); }
-
-          if(typeof showScreen==='function') showScreen('screen-app');
-          if(typeof syncSidebarRoleAccess==='function') syncSidebarRoleAccess(found);
-
-          // Carrega dados do Firebase e roteia
-          if(window._fbLoad){
-            window._fbLoad(function(){
-              if(typeof routeAfterLogin==='function') routeAfterLogin();
-              if(window._startPolling) window._startPolling();
-            });
-          } else {
-            if(typeof routeAfterLogin==='function') routeAfterLogin();
-          }
-          return; // Não vai para tela de bloqueio
-        }
-      }
-    }catch(e){ console.warn('[Session] erro restaurando', e); }
-
-    // 2. Se não tem sessão salva, mostra tela de bloqueio normal
-    if(!session.user || session.user.user==='visualizacao' || session.user.user==='_pre_admin'){
-      try{
-        session.user=null;
-        session.empresaId=null;
-      }catch(e){}
-      mostrarTelaBloqueio();
-    }
+    // Se ainda não tem usuário (fluxo normal), o IIFE de boot já cuidou da tela de bloqueio.
+    // Não fazemos nada aqui para não atrapalhar o auto-login.
   }, 200);
 });
 </script>

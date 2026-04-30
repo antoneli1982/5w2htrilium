@@ -1456,6 +1456,15 @@ tr.row-struck td.td-act, tr.row-struck td:last-child{opacity:1;text-decoration:n
 // DATA
 // ══════════════════════════════════════════
 const SENIOR_KEY = '12345';
+
+// ── Comparação de senha case-insensitive ──
+// Permite que 'CPP1234', 'cpp1234', 'Cpp1234' sejam aceitos como iguais.
+function passEq(a, b){
+  if(a===null||a===undefined) a='';
+  if(b===null||b===undefined) b='';
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
 const STATUS = {
   0:{text:'#9CA3AF',label:'Não iniciado'},
   25:{text:'#f59e0b',label:'Iniciado'},
@@ -1643,7 +1652,7 @@ function doRegister(){
   if(pass.length<4){showErr(err,'Senha deve ter mínimo 4 caracteres.');return;}
   if(pass!==pass2){showErr(err,'As senhas não coincidem.');return;}
   if(db.users.find(u=>u.user===userSave)){showErr(err,'Usuário já existe. Escolha outro.');return;}
-  if(isSenior&&special!==SENIOR_KEY){showErr(err,'Senha especial sênior incorreta.');return;}
+  if(isSenior&&!passEq(special, SENIOR_KEY)){showErr(err,'Senha especial sênior incorreta.');return;}
   const finalRole=isSenior?'senior':role;
   const photo = document.getElementById('r-photo-img').src;
   const hasPhoto = photo && photo.startsWith('data:');
@@ -1691,7 +1700,7 @@ function doLogin(){
   err.style.display='none';
   if(!userLC||!passT){showErr(err,'Preencha usuário e senha.');return;}
 
-  function tryAuth(){return db.users.find(u=>u.user.toLowerCase()===userLC&&u.pass===passT)||null;}
+  function tryAuth(){return db.users.find(u=>u.user.toLowerCase()===userLC&&passEq(u.pass, passT))||null;}
 
   var found=tryAuth();
   if(found){finishLogin(found);return;}
@@ -1878,7 +1887,7 @@ function confirmarSenhaAdmin(){
   var inp=document.getElementById('admin-pass-input');
   var err=document.getElementById('admin-pass-error');
   var senha=inp?inp.value:'';
-  if(senha!==ADMIN_SENHA){
+  if(!passEq(senha, ADMIN_SENHA)){
     if(err) err.textContent='❌ Senha incorreta. Tente novamente.';
     if(inp){ inp.value=''; inp.focus(); }
     return;
@@ -2243,7 +2252,7 @@ function salvarEmpresa(empresaId){
   const dup=(db.empresas||[]).find(x=>x.nome.toLowerCase()===nome.toLowerCase() && x.id!==empresaId);
   if(dup){ err.textContent='⚠️ Já existe uma empresa com esse nome.'; err.style.display='block'; return; }
   // Verifica senha duplicada (exceto a própria)
-  const dupSenha=(db.empresas||[]).find(x=>x.senhaCliente===senhaCliente && x.id!==empresaId);
+  const dupSenha=(db.empresas||[]).find(x=>passEq(x.senhaCliente, senhaCliente) && x.id!==empresaId);
   if(dupSenha){ err.textContent='⚠️ Esta senha já está em uso por outra empresa. Escolha uma diferente.'; err.style.display='block'; return; }
   const cor=window._empModal?.cor||'#A9E527';
   const logo=window._empModal?.logo||null;
@@ -3104,7 +3113,7 @@ function askDelProj(id){
 function confirmDelProj(){
   const pass=document.getElementById('dp-pass').value;
   const err=document.getElementById('dp-err');
-  if(!session.user||session.user.role!=='senior'||session.user.pass!==pass){
+  if(!session.user||session.user.role!=='senior'||!passEq(session.user.pass, pass)){
     showErr(err,'Senha incorreta.');return;
   }
   db.projects=db.projects.filter(p=>p.id!==session.delProjId);
@@ -4950,7 +4959,7 @@ function confirmDeleteCollaborator(){
     if(err){ err.textContent=check.target.role==='senior'?'Digite a senha mestre 12345 para confirmar.':'Digite sua senha Sênior ou a senha mestre 12345 para confirmar.'; err.style.display='block'; }
     return;
   }
-  const validPass = check.target.role==='senior' ? pass===SENIOR_KEY : (check.currentSenior.pass===pass || pass===SENIOR_KEY);
+  const validPass = check.target.role==='senior' ? passEq(pass, SENIOR_KEY) : (passEq(check.currentSenior.pass, pass) || passEq(pass, SENIOR_KEY));
   if(!validPass){
     if(err){ err.textContent=check.target.role==='senior'?'Senha mestre incorreta. Use 12345.':'Senha incorreta. Use sua senha Sênior ou a senha mestre 12345.'; err.style.display='block'; }
     return;
@@ -6555,7 +6564,7 @@ function confirmarSenhaCliente(){
   try{
     if(db && db.empresas){
       empresa=db.empresas.find(function(e){
-        return e.ativa!==false && e.senhaCliente && e.senhaCliente===senha;
+        return e.ativa!==false && e.senhaCliente && passEq(e.senhaCliente, senha);
       });
     }
   }catch(e){}

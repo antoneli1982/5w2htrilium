@@ -6711,5 +6711,60 @@ window.addEventListener('load', function(){
 });
 </script>
 
+<!-- ── PROTEÇÃO DE CÓPIA ── -->
+<script>
+(function(){
+  var _chars = 'qwxzjkvpyfgmbrnlsdthuoieaQWXZJKVPYFGMBRNLSDTHUOIEA!@#$%&*?';
+
+  function embaralhar(texto) {
+    if (!texto || !texto.trim()) return texto;
+    var resultado = '';
+    for (var i = 0; i < texto.length; i++) {
+      var c = texto[i];
+      if (c === '\n' || c === '\r') {
+        resultado += c;
+      } else if (c === ' ') {
+        // Aleatoriza se mantém espaço ou vira caractere
+        resultado += Math.random() > 0.5 ? ' ' : _chars[Math.floor(Math.random()*_chars.length)];
+      } else {
+        resultado += _chars[Math.floor(Math.random()*_chars.length)];
+      }
+    }
+    return resultado;
+  }
+
+  // Intercepta evento de cópia (Ctrl+C / botão direito > copiar)
+  document.addEventListener('copy', function(e){
+    try {
+      var sel = window.getSelection ? window.getSelection().toString() : '';
+      if (sel && sel.length > 0) {
+        e.preventDefault();
+        var lixo = embaralhar(sel);
+        if (e.clipboardData) {
+          e.clipboardData.setData('text/plain', lixo);
+          e.clipboardData.setData('text/html', '<span>' + lixo + '</span>');
+        }
+      }
+    } catch(err){}
+  }, true);
+
+  // Intercepta Ctrl+A + Ctrl+C também via keydown
+  document.addEventListener('keydown', function(e){
+    // Bloqueia PrintScreen
+    if (e.key === 'PrintScreen') {
+      try {
+        navigator.clipboard.writeText('');
+      } catch(err){}
+    }
+  }, true);
+
+  // Desabilita arrastar texto selecionado (drag-select copy)
+  document.addEventListener('dragstart', function(e){
+    e.preventDefault();
+  }, true);
+
+})();
+</script>
+
 </body>
 </html>
